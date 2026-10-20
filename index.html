@@ -29,6 +29,12 @@ canvas{width:100%;height:150px;display:block;margin-top:8px}
 .help{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:16px;color:var(--mut);font-size:12px}
 .help b{color:var(--text)}
 input[type=file]{display:none}
+.card.click{cursor:pointer}.card.click:hover{border-color:var(--acc)}
+.hint{color:var(--mut);font-size:11px;margin-top:2px}
+#drill{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:20;display:none}
+#drill .grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+#drill canvas{height:100px}
+select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit}
 </style>
 </head>
 <body>
@@ -44,6 +50,7 @@ input[type=file]{display:none}
 <div class="help">
   <b>How to load real data:</b> download each index’s daily history as CSV (Yahoo Finance → Historical Data, or NSE’s index historical page) and use the <b>Upload CSV</b> button on its card (needs a Date and Close column). Or upload one combined CSV with a <b>Date</b> column plus one column per index, named exactly as the card titles. Data stays in your browser. “Simulated sample” is random data for previewing the layout only.
 </div>
+<div id="drill"></div>
 <script>
 const IDX=[
 ["Dow Jones","^DJI"],["Nifty 50","^NSEI"],["Nifty Bank","^NSEBANK"],["Nifty IT","^CNXIT"],
@@ -115,9 +122,44 @@ function draw(cv,s,hoverX){
     c.fillStyle=css.getPropertyValue("--card").trim();c.fillText(t,tx+6,T+12);
   }
 }
+let stocks=null,openIdx=null,sortMode="def";
+function rangeBtns(host){
+  host.innerHTML="";
+  RANGES.forEach(([l,n])=>{const b=document.createElement("button");b.textContent=l;if(n===range)b.className="on";b.onclick=()=>{range=n;render()};host.appendChild(b)});
+}
+function stSeries(st){return range===1?st.ii:(st.dd&&st.dd.slice(-range))}
+function chgOf(s){
+  if(!s||s.length<2)return null;
+  const last=s[s.length-1].v,prev=(range===1&&s.base!=null)?s.base:s[s.length-2].v;
+  return {d:last-prev,p:(last-prev)/prev*100,last};
+}
+function renderDrill(){
+  const el=$("#drill");
+  if(!openIdx){el.style.display="none";el.innerHTML="";return}
+  el.style.display="block";
+  el.innerHTML=`<div class="bar"><button id="back">← Back</button><b style="font-size:18px">${openIdx} · constituents</b><span style="flex:1"></span>
+    <select id="srt"><option value="def">Index order</option><option value="up">Top gainers first</option><option value="dn">Top losers first</option></select><span id="rng2"></span></div><div class="grid" id="dg"></div>`;
+  $("#back").onclick=()=>{openIdx=null;renderDrill()};
+  $("#srt").value=sortMode;$("#srt").onchange=e=>{sortMode=e.target.value;renderDrill()};
+  rangeBtns($("#rng2"));
+  const g=$("#dg"),syms=stocks&&stocks.members[openIdx];
+  if(!syms||!syms.length){g.innerHTML='<div class="help" style="grid-column:1/-1">No stock data yet. Run the GitHub workflow once so stocks.json is created.</div>';return}
+  let list=syms.map(t=>({t,st:stocks.stocks[t]})).filter(x=>x.st).map(x=>({...x,s:stSeries(x.st)}));
+  const key=x=>{const c=chgOf(x.s);return c?c.p:null};
+  if(sortMode!=="def")list.sort((a,b)=>{const A=key(a),B=key(b);if(A==null)return 1;if(B==null)return -1;return sortMode==="up"?B-A:A-B});
+  list.forEach(({t,st,s})=>{
+    const c=chgOf(s),card=document.createElement("div");card.className="card";
+    card.innerHTML=`<div class="hd"><div><div class="nm">${t.replace(".NS","")}</div><div class="tk">${st.name.length>26?st.name.slice(0,25)+"…":st.name}</div></div>
+      ${c?`<div class="px">${fmt(+c.last.toFixed(2))}<div class="ch ${c.d>=0?"up":"dn"}">${c.d>=0?"▲":"▼"} ${c.p.toFixed(2)}%</div></div>`:""}</div>
+      ${c?"<canvas></canvas>":'<div class="empty">No data</div>'}`;
+    g.appendChild(card);
+    const cv=card.querySelector("canvas");
+    if(cv){draw(cv,s);cv.onmousemove=e=>draw(cv,s,e.offsetX);cv.onmouseleave=()=>draw(cv,s);
+      cv.ontouchmove=e=>{const r=cv.getBoundingClientRect();draw(cv,s,e.touches[0].clientX-r.left)}}
+  });
+}
 function render(){
-  $("#rng").innerHTML="";
-  RANGES.forEach(([l,n])=>{const b=document.createElement("button");b.textContent=l;if(n===range)b.className="on";b.onclick=()=>{range=n;render()};$("#rng").appendChild(b)});
+  rangeBtns($("#rng"));
   const g=$("#grid");g.innerHTML="";
   IDX.forEach(([n,t])=>{
     const card=document.createElement("div");card.className="card";
@@ -132,16 +174,26 @@ function render(){
       ${s&&s.length>1?'<canvas></canvas>':'<div class="empty">No data yet<br>Upload a daily CSV for this index</div>'}
       <div class="ft"><span>${s&&s.length>1?(range===1?"Latest session · "+fd(s[0].d,s,true)+" → "+fd(s[s.length-1].d,s,true):s[0].d.toLocaleDateString("en-GB")+" → "+s[s.length-1].d.toLocaleDateString("en-GB")):""}</span>
       <label style="cursor:pointer;color:var(--acc)">Upload CSV<input type="file" accept=".csv"></label></div>`;
+    card.classList.add("click");
+    card.querySelector(".nm").insertAdjacentHTML("afterend",'<div class="hint">Click chart to see all stocks →</div>');
+    card.onclick=e=>{if(e.target.closest("label"))return;openIdx=n;renderDrill()};
     card.querySelector("input").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(x=>loadSingle(n,x))};
     g.appendChild(card);
     const cv=card.querySelector("canvas");
     if(cv){draw(cv,s);cv.onmousemove=e=>draw(cv,s,e.offsetX);cv.onmouseleave=()=>draw(cv,s);
       cv.ontouchmove=e=>{const r=cv.getBoundingClientRect();draw(cv,s,e.touches[0].clientX-r.left)}}
   });
+  renderDrill();
 }
 $("#all").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(loadCombined)};
 $("#demo").onclick=sample;
 addEventListener("resize",render);
+fetch("stocks.json?v="+Date.now()).then(r=>r.ok?r.json():Promise.reject()).then(j=>{
+  Object.values(j.stocks).forEach(st=>{
+    st.dd=st.d.map(([k,v])=>({d:new Date(k),v}));
+    st.ii=st.i.map(([t,v])=>({d:new Date(t*1000),v}));st.ii.tz=st.tz;st.ii.base=st.prev;
+  });stocks=j;renderDrill()}).catch(()=>{});
+addEventListener("keydown",e=>{if(e.key==="Escape"&&openIdx){openIdx=null;renderDrill()}});
 fetch("intraday.json?v="+Date.now()).then(r=>r.ok?r.json():Promise.reject()).then(j=>{
   Object.keys(j).forEach(n=>{const a=j[n].pts.map(([t,v])=>({d:new Date(t*1000),v}));a.tz=j[n].tz;a.base=j[n].prev;if(a.length>1)intra[n]=a});render()}).catch(()=>{});
 fetch("dashboard.csv?v="+Date.now()).then(r=>r.ok?r.text():Promise.reject()).then(loadCombined).catch(()=>{});
