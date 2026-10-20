@@ -19,10 +19,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - run: python fetch_yahoo.py --range 2y
+      - name: Fetch data (stocks only on the daily final run or manual run)
+        run: python fetch_yahoo.py --range 2y ${{ (github.event.schedule == '30 22 * * 1-5' || github.event_name == 'workflow_dispatch') && '--stocks' || '' }}
       - name: Commit updated data
         run: |
           git config user.name "market-bot"
           git config user.email "market-bot@users.noreply.github.com"
           git add dashboard.csv intraday.json
+          if [ -f stocks.json ]; then git add stocks.json; fi
           git diff --staged --quiet || (git commit -m "Update market data" && git push)
