@@ -2,7 +2,9 @@ name: Update market data
 
 on:
   schedule:
-    - cron: "30 22 * * 1-5"   # 22:30 UTC, Mon-Fri (after both India and US close)
+      - cron: "30 22 * * 1-5"   # 22:30 UTC, Mon-Fri (final data after both India and US close)
+      - cron: "15 4-10 * * 1-5"  # hourly during Indian market hours (UTC)
+      - cron: "15 14-21 * * 1-5" # hourly during US market hours (UTC)
   workflow_dispatch:           # lets you run it manually from the Actions tab
 
 permissions:
@@ -22,5 +24,5 @@ jobs:
         run: |
           git config user.name "market-bot"
           git config user.email "market-bot@users.noreply.github.com"
-          git add dashboard.csv
+          git add dashboard.csv intraday.json
           git diff --staged --quiet || (git commit -m "Update market data" && git push)
