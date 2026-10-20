@@ -34,6 +34,26 @@ input[type=file]{display:none}
 #drill{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:20;display:none}
 #drill .grid{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
 #drill canvas{height:100px}
+#opt{position:fixed;inset:0;background:var(--bg);overflow:auto;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;display:none}
+.seg{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--line)}
+.seg i{display:block;height:100%}
+.bbig{display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;margin:10px 0 8px}
+.bbig div{font-size:12px;color:var(--mut)}.bbig b{display:block;font-size:22px;color:var(--text)}
+table.bt{border-collapse:collapse;width:100%;font-size:12px}
+table.bt td,table.bt th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+table.bt th{color:var(--mut);font-weight:500}table.bt td:first-child,table.bt th:first-child{text-align:left}
+table.bt tr.pick td{background:var(--bg)}table.bt tr{cursor:pointer}
+.bgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:10px}
+.bgrid canvas{height:130px;margin-top:2px}.bgrid h4{margin:0;font-size:12px;color:var(--mut);font-weight:500}
+.kpis{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.kpi small{display:block;color:var(--mut);font-size:11px}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+table.oc{border-collapse:collapse;width:100%;min-width:640px;font-size:12px;text-align:right}
+table.oc th,table.oc td{padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.oc th{color:var(--mut);font-weight:500;position:sticky;top:0;background:var(--card)}
+table.oc td.k{font-weight:700;text-align:center;background:var(--bg)}
+table.oc tr.atm td{border-top:2px solid var(--acc);border-bottom:2px solid var(--acc)}
 select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit}
 </style>
 </head>
@@ -46,11 +66,13 @@ select{background:var(--card);color:var(--text);border:1px solid var(--line);bor
   <span style="flex:1"></span>
   <span id="rng"></span>
 </div>
-<div class="grid" id="grid"></div>
+<div id="breadth"></div>
+<div class="grid" id="grid" style="margin-top:16px"></div>
 <div class="help">
   <b>How to load real data:</b> download each index’s daily history as CSV (Yahoo Finance → Historical Data, or NSE’s index historical page) and use the <b>Upload CSV</b> button on its card (needs a Date and Close column). Or upload one combined CSV with a <b>Date</b> column plus one column per index, named exactly as the card titles. Data stays in your browser. “Simulated sample” is random data for previewing the layout only.
 </div>
 <div id="drill"></div>
+<div id="opt"></div>
 <script>
 const IDX=[
 ["Dow Jones","^DJI"],["Nifty 50","^NSEI"],["Nifty Bank","^NSEBANK"],["Nifty IT","^CNXIT"],
@@ -122,7 +144,7 @@ function draw(cv,s,hoverX){
     c.fillStyle=css.getPropertyValue("--card").trim();c.fillText(t,tx+6,T+12);
   }
 }
-let stocks=null,openIdx=null,sortMode="def";
+let stocks=null,openIdx=null,sortMode="def",opts=null,openOpt=null;
 function rangeBtns(host){
   host.innerHTML="";
   RANGES.forEach(([l,n])=>{const b=document.createElement("button");b.textContent=l;if(n===range)b.className="on";b.onclick=()=>{range=n;render()};host.appendChild(b)});
@@ -132,6 +154,37 @@ function chgOf(s){
   if(!s||s.length<2)return null;
   const last=s[s.length-1].v,prev=(range===1&&s.base!=null)?s.base:s[s.length-2].v;
   return {d:last-prev,p:(last-prev)/prev*100,last};
+}
+const oiF=n=>n==null?"–":Math.abs(n)>=1e7?(n/1e7).toFixed(2)+"Cr":Math.abs(n)>=1e5?(n/1e5).toFixed(2)+"L":Math.abs(n)>=1e3?(n/1e3).toFixed(1)+"K":String(n);
+const nF=(n,d=2)=>n==null?"–":(+n).toLocaleString("en-IN",{maximumFractionDigits:d});
+const chC=n=>n==null?"":n>=0?"up":"dn";
+function renderOpt(){
+  const el=$("#opt");
+  if(!openOpt){el.style.display="none";el.innerHTML="";return}
+  el.style.display="block";
+  const t=openOpt,st=stocks&&stocks.stocks[t],name=(st&&st.name)||t,o=opts&&opts.stocks[t];
+  let body;
+  if(!opts)body='<div class="help">options.json not found. Add your Dhan secrets and run <b>Actions → Update option data</b> once.</div>';
+  else if(!o)body='<div class="help">No option data for this stock. It may not be in the F&amp;O segment, or Dhan returned nothing for it.'+((opts.errors||[]).length?" Last errors: "+opts.errors.join(" | "):"")+'</div>';
+  else{
+    const s=o.summary,mx=Math.max(1,...o.chain.map(r=>Math.max(r[2]||0,r[6]||0)));
+    let atm=0,bd=1e18;o.chain.forEach((r,i)=>{const d=Math.abs(r[0]-o.spot);if(d<bd){bd=d;atm=i}});
+    body=`<div class="kpis">
+      <div class="kpi"><small>Spot</small>${nF(o.spot)}</div><div class="kpi"><small>Expiry</small>${o.expiry}</div>
+      <div class="kpi"><small>PCR (OI)</small>${s.pcr==null?"–":s.pcr}</div><div class="kpi"><small>Max pain</small>${nF(s.maxPain)}</div>
+      <div class="kpi"><small>Call OI</small>${oiF(s.ceOi)}</div><div class="kpi"><small>Put OI</small>${oiF(s.peOi)}</div>
+      <div class="kpi"><small>Top call OI strike</small>${nF(s.topCe)}</div><div class="kpi"><small>Top put OI strike</small>${nF(s.topPe)}</div></div>
+      <div class="tw"><table class="oc"><thead><tr><th>IV</th><th>ΔOI</th><th>OI</th><th>LTP</th><th style="text-align:center">STRIKE</th><th style="text-align:left">LTP</th><th style="text-align:left">OI</th><th style="text-align:left">ΔOI</th><th style="text-align:left">IV</th></tr></thead><tbody>`+
+      o.chain.map((r,i)=>{const cw=(r[2]||0)/mx*100,pw=(r[6]||0)/mx*100;
+        return `<tr class="${i===atm?"atm":""}"><td>${nF(r[4],1)}</td><td class="${chC(r[3])}">${oiF(r[3])}</td>
+        <td style="background:linear-gradient(to left,rgba(217,48,37,.2) ${cw}%,transparent ${cw}%)">${oiF(r[2])}</td><td>${nF(r[1])}</td>
+        <td class="k">${nF(r[0])}</td><td style="text-align:left">${nF(r[5])}</td>
+        <td style="text-align:left;background:linear-gradient(to right,rgba(15,157,88,.2) ${pw}%,transparent ${pw}%)">${oiF(r[6])}</td>
+        <td style="text-align:left" class="${chC(r[7])}">${oiF(r[7])}</td><td style="text-align:left">${nF(r[8],1)}</td></tr>`}).join("")+
+      `</tbody></table></div><p class="sub" style="margin-top:8px">Calls on the left, puts on the right. Showing strikes around the spot price, nearest expiry. ΔOI is the change since the previous day. Updated ${opts.updated?new Date(opts.updated).toLocaleString():""}.</p>`;
+  }
+  el.innerHTML=`<div class="bar"><button id="oback">← Back</button><b style="font-size:18px">${t.replace(".NS","")} · option chain</b><span class="tk">${name}</span></div>`+body;
+  $("#oback").onclick=()=>{openOpt=null;renderOpt()};
 }
 function renderDrill(){
   const el=$("#drill");
@@ -143,20 +196,89 @@ function renderDrill(){
   $("#srt").value=sortMode;$("#srt").onchange=e=>{sortMode=e.target.value;renderDrill()};
   rangeBtns($("#rng2"));
   const g=$("#dg"),syms=stocks&&stocks.members[openIdx];
-  if(!syms||!syms.length){g.innerHTML='<div class="help" style="grid-column:1/-1">No stock data yet. Run the GitHub workflow once so stocks.json is created.</div>';return}
+  if(!syms||!syms.length){
+    let why;
+    if(location.protocol==="file:")why="This page was opened as a local file, so the browser blocks loading stocks.json. Open it from your GitHub Pages link instead.";
+    else if(!stocks)why="stocks.json could not be loaded. Check that it exists in your repo (Actions → Update market data → Run workflow, wait for a green run, then hard-refresh this page).";
+    else why="stocks.json loaded, but it has no stocks for "+openIdx+". "+((stocks.errors||[]).join(" | ")||"Check the workflow log for !! lines.");
+    g.innerHTML='<div class="help" style="grid-column:1/-1">'+why+'</div>';return}
   let list=syms.map(t=>({t,st:stocks.stocks[t]})).filter(x=>x.st).map(x=>({...x,s:stSeries(x.st)}));
   const key=x=>{const c=chgOf(x.s);return c?c.p:null};
   if(sortMode!=="def")list.sort((a,b)=>{const A=key(a),B=key(b);if(A==null)return 1;if(B==null)return -1;return sortMode==="up"?B-A:A-B});
   list.forEach(({t,st,s})=>{
     const c=chgOf(s),card=document.createElement("div");card.className="card";
-    card.innerHTML=`<div class="hd"><div><div class="nm">${t.replace(".NS","")}</div><div class="tk">${st.name.length>26?st.name.slice(0,25)+"…":st.name}</div></div>
+    card.innerHTML=`<div class="hd"><div><div class="nm">${t.replace(".NS","")}</div><div class="tk">${st.name.length>26?st.name.slice(0,25)+"…":st.name}</div>${(opts&&opts.stocks[t])?`<div class="hint">Options · PCR ${opts.stocks[t].summary.pcr==null?"–":opts.stocks[t].summary.pcr}</div>`:'<div class="hint">Tap for options</div>'}</div>
       ${c?`<div class="px">${fmt(+c.last.toFixed(2))}<div class="ch ${c.d>=0?"up":"dn"}">${c.d>=0?"▲":"▼"} ${c.p.toFixed(2)}%</div></div>`:""}</div>
       ${c?"<canvas></canvas>":'<div class="empty">No data</div>'}`;
+    card.classList.add("click");card.onclick=()=>{openOpt=t;renderOpt()};
     g.appendChild(card);
     const cv=card.querySelector("canvas");
     if(cv){draw(cv,s);cv.onmousemove=e=>draw(cv,s,e.offsetX);cv.onmouseleave=()=>draw(cv,s);
       cv.ontouchmove=e=>{const r=cv.getBoundingClientRect();draw(cv,s,e.touches[0].clientX-r.left)}}
   });
+}
+let B={},bIdx="Nifty 50";
+function buildBreadth(){
+  B={};
+  Object.keys(stocks.members).forEach(idx=>{
+    const m={};
+    stocks.members[idx].forEach(t=>{
+      const st=stocks.stocks[t];if(!st)return;
+      for(let i=1;i<st.d.length;i++){
+        const k=st.d[i][0],c=st.d[i][1],p=st.d[i-1][1];
+        const o=m[k]||(m[k]={t:k,a:0,d:0,u:0});
+        if(c>p)o.a++;else if(c<p)o.d++;else o.u++;
+      }
+    });
+    const arr=Object.values(m).sort((x,y)=>x.t<y.t?-1:1);
+    const mx=Math.max(0,...arr.map(o=>o.a+o.d+o.u));
+    B[idx]=arr.filter(o=>o.a+o.d+o.u>=mx*0.8);   // drop days with too few stocks reporting
+  });
+}
+function drawBars(cv,days,hx){
+  const dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
+  cv.width=W*dpr;cv.height=H*dpr;const c=cv.getContext("2d");c.scale(dpr,dpr);
+  const css=getComputedStyle(document.documentElement),g=n=>css.getPropertyValue(n).trim();
+  const net=days.map(o=>o.a-o.d),mx=Math.max(1,...net.map(Math.abs)),L=4,R=30,T=6,Bt=14,mid=T+(H-T-Bt)/2,bw=(W-L-R)/days.length;
+  c.strokeStyle=g("--line");c.beginPath();c.moveTo(L,mid);c.lineTo(W-R,mid);c.stroke();
+  c.fillStyle=g("--mut");c.font="10px system-ui";c.fillText("+"+mx,W-R+3,T+8);c.fillText("−"+mx,W-R+3,H-Bt);c.fillText("0",W-R+3,mid+3);
+  net.forEach((v,i)=>{const hh=Math.abs(v)/mx*((H-T-Bt)/2);c.fillStyle=v>=0?g("--up"):g("--dn");
+    c.fillRect(L+i*bw+bw*0.12,v>=0?mid-hh:mid,Math.max(bw*0.76,1),Math.max(hh,1))});
+  c.fillStyle=g("--mut");c.fillText(new Date(days[0].t).toLocaleDateString("en-GB",{day:"numeric",month:"short"}),L,H-2);
+  if(hx!=null){const i=Math.max(0,Math.min(days.length-1,Math.floor((hx-L)/bw))),o=days[i];
+    const t=new Date(o.t).toLocaleDateString("en-GB",{day:"numeric",month:"short"})+"  ▲"+o.a+" ▼"+o.d+(o.u?" ="+o.u:"");
+    const tw=c.measureText(t).width+12,tx=Math.min(Math.max(L+i*bw-tw/2,2),W-tw-2);
+    c.fillStyle=g("--text");c.fillRect(tx,T,tw,18);c.fillStyle=g("--card");c.fillText(t,tx+6,T+12)}
+}
+function renderBreadth(){
+  const el=$("#breadth");
+  if(!stocks||!B[bIdx]||!B[bIdx].length){
+    el.innerHTML='<div class="help" style="margin:0">Advance / decline needs <b>stocks.json</b> (the constituent data). Run <b>Actions → Update market data</b> once to create it.</div>';return}
+  const days=B[bIdx],last=days[days.length-1],tot=last.a+last.d+last.u,n=range===1?22:range,win=days.slice(-n);
+  const ratio=last.d?(last.a/last.d).toFixed(2):"∞";
+  let cum=0;const cs=win.map(o=>({d:new Date(o.t),v:(cum+=o.a-o.d)}));
+  const opts_=Object.keys(B).map(k=>`<option ${k===bIdx?"selected":""}>${k}</option>`).join("");
+  const pct=x=>(x/tot*100).toFixed(1);
+  el.innerHTML=`<div class="card"><div class="hd"><div><div class="nm">Market breadth · advance / decline</div>
+    <div class="tk">Based on the stocks in the selected index · latest session ${new Date(last.t).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</div></div>
+    <select id="bsel">${opts_}</select></div>
+    <div class="bbig"><div><b class="up">${last.a}</b>Advances</div><div><b class="dn">${last.d}</b>Declines</div><div><b>${last.u}</b>Unchanged</div>
+    <div><b>${ratio}</b>A/D ratio</div><div><b class="${last.a>=last.d?"up":"dn"}">${last.a-last.d>0?"+":""}${last.a-last.d}</b>Net advances</div></div>
+    <div class="seg"><i style="width:${pct(last.a)}%;background:var(--up)"></i><i style="width:${pct(last.u)}%;background:var(--mut)"></i><i style="width:${pct(last.d)}%;background:var(--dn)"></i></div>
+    <div class="bgrid"><div><h4>Daily net advances (advances − declines)</h4><canvas id="bc1"></canvas></div>
+    <div><h4>Cumulative A/D line</h4><canvas id="bc2"></canvas></div></div>
+    <div class="tw" style="margin-top:12px;border:none"><table class="bt"><thead><tr><th>Index (tap to select)</th><th>Adv</th><th>Dec</th><th>Unch</th><th style="width:30%">Breadth</th></tr></thead><tbody>
+    ${Object.keys(B).map(k=>{const l=B[k][B[k].length-1];if(!l)return"";const t=l.a+l.d+l.u;
+      return `<tr data-k="${k}" class="${k===bIdx?"pick":""}"><td>${k}</td><td class="up">${l.a}</td><td class="dn">${l.d}</td><td>${l.u}</td>
+      <td><div class="seg" style="height:8px"><i style="width:${l.a/t*100}%;background:var(--up)"></i><i style="width:${l.u/t*100}%;background:var(--mut)"></i><i style="width:${l.d/t*100}%;background:var(--dn)"></i></div></td></tr>`}).join("")}
+    </tbody></table></div></div>`;
+  $("#bsel").onchange=e=>{bIdx=e.target.value;renderBreadth()};
+  el.querySelectorAll("tr[data-k]").forEach(r=>r.onclick=()=>{bIdx=r.dataset.k;renderBreadth()});
+  const c1=$("#bc1"),c2=$("#bc2");
+  drawBars(c1,win);c1.onmousemove=e=>drawBars(c1,win,e.offsetX);c1.onmouseleave=()=>drawBars(c1,win);
+  c1.ontouchmove=e=>{const r=c1.getBoundingClientRect();drawBars(c1,win,e.touches[0].clientX-r.left)};
+  if(cs.length>1){draw(c2,cs);c2.onmousemove=e=>draw(c2,cs,e.offsetX);c2.onmouseleave=()=>draw(c2,cs);
+    c2.ontouchmove=e=>{const r=c2.getBoundingClientRect();draw(c2,cs,e.touches[0].clientX-r.left)}}
 }
 function render(){
   rangeBtns($("#rng"));
@@ -183,6 +305,7 @@ function render(){
     if(cv){draw(cv,s);cv.onmousemove=e=>draw(cv,s,e.offsetX);cv.onmouseleave=()=>draw(cv,s);
       cv.ontouchmove=e=>{const r=cv.getBoundingClientRect();draw(cv,s,e.touches[0].clientX-r.left)}}
   });
+  renderBreadth();
   renderDrill();
 }
 $("#all").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(loadCombined)};
@@ -192,8 +315,9 @@ fetch("stocks.json?v="+Date.now()).then(r=>r.ok?r.json():Promise.reject()).then(
   Object.values(j.stocks).forEach(st=>{
     st.dd=st.d.map(([k,v])=>({d:new Date(k),v}));
     st.ii=st.i.map(([t,v])=>({d:new Date(t*1000),v}));st.ii.tz=st.tz;st.ii.base=st.prev;
-  });stocks=j;renderDrill()}).catch(()=>{});
-addEventListener("keydown",e=>{if(e.key==="Escape"&&openIdx){openIdx=null;renderDrill()}});
+  });stocks=j;buildBreadth();render()}).catch(()=>{});
+addEventListener("keydown",e=>{if(e.key!=="Escape")return;if(openOpt){openOpt=null;renderOpt()}else if(openIdx){openIdx=null;renderDrill()}});
+fetch("options.json?v="+Date.now()).then(r=>r.ok?r.json():Promise.reject()).then(j=>{opts=j;renderDrill();renderOpt()}).catch(()=>{});
 fetch("intraday.json?v="+Date.now()).then(r=>r.ok?r.json():Promise.reject()).then(j=>{
   Object.keys(j).forEach(n=>{const a=j[n].pts.map(([t,v])=>({d:new Date(t*1000),v}));a.tz=j[n].tz;a.base=j[n].prev;if(a.length>1)intra[n]=a});render()}).catch(()=>{});
 fetch("dashboard.csv?v="+Date.now()).then(r=>r.ok?r.text():Promise.reject()).then(loadCombined).catch(()=>{});
