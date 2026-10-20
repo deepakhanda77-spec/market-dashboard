@@ -49,8 +49,8 @@ const IDX=[
 ["Dow Jones","^DJI"],["Nifty 50","^NSEI"],["Nifty Bank","^NSEBANK"],["Nifty IT","^CNXIT"],
 ["Nifty Auto","^CNXAUTO"],["Nifty FMCG","^CNXFMCG"],["Nifty Pharma","^CNXPHARMA"],["Nifty Metal","^CNXMETAL"],
 ["Nifty Energy","^CNXENERGY"],["Nifty Realty","^CNXREALTY"],["Nifty PSU Bank","^CNXPSUBANK"],["Nifty Fin Service","^CNXFIN"]];
-const data={};let range=60;
-const RANGES=[["1M",22],["3M",66],["6M",130],["All",1e9]];
+const data={},intra={};let range=66;
+const RANGES=[["1D",1],["1M",22],["3M",66],["6M",130],["All",1e9]];
 const $=s=>document.querySelector(s);
 const fmt=n=>n.toLocaleString("en-IN",{maximumFractionDigits:2});
 
@@ -85,12 +85,16 @@ function sample(){
   IDX.forEach(([n],i)=>{let v=base[i];data[n]=days.map(dt=>{v*=1+(Math.random()-0.48)*0.012;return{d:dt,v}})});
   render();
 }
+function fd(d,s,short){
+  if(s.tz){const t=d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:s.tz});
+    return short?t:d.toLocaleDateString("en-GB",{day:"numeric",month:"short",timeZone:s.tz})+" "+t}
+  return d.toLocaleDateString("en-GB",short?{day:"numeric",month:"short"}:{day:"numeric",month:"short",year:"2-digit"})}
 function draw(cv,s,hoverX){
   const dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
   cv.width=W*dpr;cv.height=H*dpr;
   const c=cv.getContext("2d");c.scale(dpr,dpr);
   const css=getComputedStyle(document.documentElement);
-  const up=s[s.length-1].v>=s[0].v,col=css.getPropertyValue(up?"--up":"--dn").trim();
+  const up=s[s.length-1].v>=(s.base!=null?s.base:s[0].v),col=css.getPropertyValue(up?"--up":"--dn").trim();
   const min=Math.min(...s.map(p=>p.v)),max=Math.max(...s.map(p=>p.v)),pad=(max-min)*0.1||1;
   const lo=min-pad,hi=max+pad,L=4,R=46,T=6,B=14;
   const x=i=>L+i*(W-L-R)/Math.max(s.length-1,1),y=v=>T+(hi-v)*(H-T-B)/(hi-lo);
@@ -100,12 +104,12 @@ function draw(cv,s,hoverX){
   c.strokeStyle=col;c.lineWidth=1.8;c.stroke();
   c.lineTo(x(s.length-1),H-B);c.lineTo(x(0),H-B);c.closePath();c.globalAlpha=.1;c.fillStyle=col;c.fill();c.globalAlpha=1;
   c.fillStyle=css.getPropertyValue("--mut").trim();
-  c.fillText(s[0].d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),L,H-2);
+  c.fillText(fd(s[0].d,s,true),L,H-2);
   if(hoverX!=null){
     const i=Math.max(0,Math.min(s.length-1,Math.round((hoverX-L)/(W-L-R)*(s.length-1))));
     const p=s[i];c.strokeStyle=css.getPropertyValue("--mut").trim();c.beginPath();c.moveTo(x(i),T);c.lineTo(x(i),H-B);c.stroke();
     c.fillStyle=col;c.beginPath();c.arc(x(i),y(p.v),3.5,0,7);c.fill();
-    const t=p.d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})+"  "+fmt(+p.v.toFixed(2));
+    const t=fd(p.d,s)+"  "+fmt(+p.v.toFixed(2));
     const tw=c.measureText(t).width+12,tx=Math.min(Math.max(x(i)-tw/2,2),W-tw-2);
     c.fillStyle=css.getPropertyValue("--text").trim();c.fillRect(tx,T,tw,18);
     c.fillStyle=css.getPropertyValue("--card").trim();c.fillText(t,tx+6,T+12);
@@ -117,15 +121,16 @@ function render(){
   const g=$("#grid");g.innerHTML="";
   IDX.forEach(([n,t])=>{
     const card=document.createElement("div");card.className="card";
-    const full=data[n],s=full&&full.slice(-range);
+    let s;
+    if(range===1){s=intra[n]}else{const full=data[n];s=full&&full.slice(-range)}
     let top="";
     if(s&&s.length>1){
-      const last=s[s.length-1].v,prev=s[s.length-2].v,d=last-prev,p=d/prev*100;
+      const last=s[s.length-1].v,prev=(range===1&&s.base!=null)?s.base:s[s.length-2].v,d=last-prev,p=d/prev*100;
       top=`<div class="px">${fmt(+last.toFixed(2))}<div class="ch ${d>=0?"up":"dn"}">${d>=0?"▲":"▼"} ${fmt(+Math.abs(d).toFixed(2))} (${p.toFixed(2)}%)</div></div>`;
     }
     card.innerHTML=`<div class="hd"><div><div class="nm">${n}</div><div class="tk">${t}</div></div>${top}</div>
       ${s&&s.length>1?'<canvas></canvas>':'<div class="empty">No data yet<br>Upload a daily CSV for this index</div>'}
-      <div class="ft"><span>${s&&s.length>1?s[0].d.toLocaleDateString("en-GB")+" → "+s[s.length-1].d.toLocaleDateString("en-GB"):""}</span>
+      <div class="ft"><span>${s&&s.length>1?(range===1?"Latest session · "+fd(s[0].d,s,true)+" → "+fd(s[s.length-1].d,s,true):s[0].d.toLocaleDateString("en-GB")+" → "+s[s.length-1].d.toLocaleDateString("en-GB")):""}</span>
       <label style="cursor:pointer;color:var(--acc)">Upload CSV<input type="file" accept=".csv"></label></div>`;
     card.querySelector("input").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(x=>loadSingle(n,x))};
     g.appendChild(card);
@@ -137,6 +142,8 @@ function render(){
 $("#all").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(loadCombined)};
 $("#demo").onclick=sample;
 addEventListener("resize",render);
+fetch("intraday.json?v="+Date.now()).then(r=>r.ok?r.json():Promise.reject()).then(j=>{
+  Object.keys(j).forEach(n=>{const a=j[n].pts.map(([t,v])=>({d:new Date(t*1000),v}));a.tz=j[n].tz;a.base=j[n].prev;if(a.length>1)intra[n]=a});render()}).catch(()=>{});
 fetch("dashboard.csv?v="+Date.now()).then(r=>r.ok?r.text():Promise.reject()).then(loadCombined).catch(()=>{});
 render();
 </script>

@@ -6,7 +6,7 @@ Yahoo Finance and write dashboard.csv for the dashboard's "Upload combined CSV".
 Setup:  pip install requests
 Run:    python fetch_yahoo.py --range 1y        (e.g. 3mo, 6mo, 1y, 2y, 5y, max)
 """
-import argparse, csv
+import argparse, csv, json
 from datetime import datetime, timezone
 import requests
 
@@ -46,6 +46,24 @@ def fetch(ticker, rng):
     raise err
 
 
+def fetch_intraday(ticker):
+    """Latest session in 5-minute steps, plus previous close and exchange timezone."""
+    for host in ("query1", "query2"):
+        try:
+            r = requests.get(
+                f"https://{host}.finance.yahoo.com/v8/finance/chart/{requests.utils.quote(ticker)}",
+                params={"range": "1d", "interval": "5m"}, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            res = r.json()["chart"]["result"][0]
+            m = res["meta"]
+            pts = [[t, round(c, 2)] for t, c in
+                   zip(res["timestamp"], res["indicators"]["quote"][0]["close"]) if c is not None]
+            return {"tz": m.get("exchangeTimezoneName"), "prev": m.get("chartPreviousClose"), "pts": pts}
+        except Exception as e:
+            err = e
+    raise err
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--range", default="1y")
@@ -66,6 +84,16 @@ def main():
         w.writerow(["Date"] + list(series))
         for d in dates:
             w.writerow([d] + [round(series[k][d], 2) if d in series[k] else "" for k in series])
+    intraday = {}
+    for name, tk in TICKERS.items():
+        try:
+            intraday[name] = fetch_intraday(tk)
+            print(f"{name:18} intraday {len(intraday[name]['pts'])} points")
+        except Exception as e:
+            print(f"!! {name} intraday failed: {e}")
+    with open("intraday.json", "w") as f:
+        json.dump(intraday, f)
+
     print(f"\nWrote {a.out} ({len(dates)} days). Upload it via 'Upload combined CSV' on the dashboard.")
 
 
