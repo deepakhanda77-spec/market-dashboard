@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dow Jones, Nifty &amp; Sectoral Dashboard</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#1a1d23;--mut:#6b7280;--line:#e5e7eb;--up:#0f9d58;--dn:#d93025;--acc:#2563eb;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--card:#181b21;--text:#e8eaed;--mut:#9aa0a6;--line:#2a2e36;--up:#34c77b;--dn:#f06a60;--acc:#6ea0ff}}
+:root[data-theme="dark"]{--bg:#0f1115;--card:#181b21;--text:#e8eaed;--mut:#9aa0a6;--line:#2a2e36;--up:#34c77b;--dn:#f06a60;--acc:#6ea0ff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 14px;font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+button,label.btn{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.hd{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.nm{font-weight:600}.tk{color:var(--mut);font-size:12px}
+.px{text-align:right;font-weight:600}.ch{font-size:12px}
+.up{color:var(--up)}.dn{color:var(--dn)}
+canvas{width:100%;height:150px;display:block;margin-top:8px}
+.empty{height:150px;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:12px;text-align:center;margin-top:8px;border:1px dashed var(--line);border-radius:8px}
+.ft{display:flex;justify-content:space-between;color:var(--mut);font-size:11px;margin-top:6px}
+.help{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:16px;color:var(--mut);font-size:12px}
+.help b{color:var(--text)}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+<h1>Markets Dashboard</h1>
+<p class="sub">Daily closing charts · Dow Jones, Nifty 50 and 10 Nifty sectoral indices</p>
+<div class="bar">
+  <label class="btn">Upload combined CSV<input type="file" id="all" accept=".csv"></label>
+  <button id="demo">Load simulated sample</button>
+  <span style="flex:1"></span>
+  <span id="rng"></span>
+</div>
+<div class="grid" id="grid"></div>
+<div class="help">
+  <b>How to load real data:</b> download each index’s daily history as CSV (Yahoo Finance → Historical Data, or NSE’s index historical page) and use the <b>Upload CSV</b> button on its card (needs a Date and Close column). Or upload one combined CSV with a <b>Date</b> column plus one column per index, named exactly as the card titles. Data stays in your browser. “Simulated sample” is random data for previewing the layout only.
+</div>
+<script>
+const IDX=[
+["Dow Jones","^DJI"],["Nifty 50","^NSEI"],["Nifty Bank","^NSEBANK"],["Nifty IT","^CNXIT"],
+["Nifty Auto","^CNXAUTO"],["Nifty FMCG","^CNXFMCG"],["Nifty Pharma","^CNXPHARMA"],["Nifty Metal","^CNXMETAL"],
+["Nifty Energy","^CNXENERGY"],["Nifty Realty","^CNXREALTY"],["Nifty PSU Bank","^CNXPSUBANK"],["Nifty Fin Service","^CNXFIN"]];
+const data={};let range=60;
+const RANGES=[["1M",22],["3M",66],["6M",130],["All",1e9]];
+const $=s=>document.querySelector(s);
+const fmt=n=>n.toLocaleString("en-IN",{maximumFractionDigits:2});
+
+function parseCSV(t){
+  const rows=t.trim().split(/\r?\n/).map(r=>r.split(",").map(c=>c.trim().replace(/^"|"$/g,"")));
+  return {head:rows[0].map(h=>h.toLowerCase()),rows:rows.slice(1)};
+}
+function toSeries(rows,di,vi){
+  return rows.map(r=>({d:new Date(r[di]),v:parseFloat(String(r[vi]).replace(/,/g,""))}))
+    .filter(p=>!isNaN(p.d)&&!isNaN(p.v)).sort((a,b)=>a.d-b.d);
+}
+function loadSingle(name,text){
+  const {head,rows}=parseCSV(text);
+  const di=head.findIndex(h=>h.includes("date"));
+  let vi=head.indexOf("close");if(vi<0)vi=head.findIndex(h=>h.includes("close"));
+  if(di<0||vi<0){alert("CSV needs Date and Close columns.");return}
+  data[name]=toSeries(rows,di,vi);render();
+}
+function loadCombined(text){
+  const {head,rows}=parseCSV(text);
+  const di=head.findIndex(h=>h.includes("date"));
+  if(di<0){alert("Combined CSV needs a Date column.");return}
+  let hit=0;
+  IDX.forEach(([n])=>{const vi=head.indexOf(n.toLowerCase());if(vi>=0){data[n]=toSeries(rows,di,vi);hit++}});
+  if(!hit)alert("No columns matched the index names.");
+  render();
+}
+function sample(){
+  const days=[];let d=new Date();d.setDate(d.getDate()-200);
+  while(days.length<140){d.setDate(d.getDate()+1);if(d.getDay()%6)days.push(new Date(d))}
+  const base=[42000,24500,52000,38000,23500,56000,22000,9000,38000,950,6800,26000];
+  IDX.forEach(([n],i)=>{let v=base[i];data[n]=days.map(dt=>{v*=1+(Math.random()-0.48)*0.012;return{d:dt,v}})});
+  render();
+}
+function draw(cv,s,hoverX){
+  const dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
+  cv.width=W*dpr;cv.height=H*dpr;
+  const c=cv.getContext("2d");c.scale(dpr,dpr);
+  const css=getComputedStyle(document.documentElement);
+  const up=s[s.length-1].v>=s[0].v,col=css.getPropertyValue(up?"--up":"--dn").trim();
+  const min=Math.min(...s.map(p=>p.v)),max=Math.max(...s.map(p=>p.v)),pad=(max-min)*0.1||1;
+  const lo=min-pad,hi=max+pad,L=4,R=46,T=6,B=14;
+  const x=i=>L+i*(W-L-R)/Math.max(s.length-1,1),y=v=>T+(hi-v)*(H-T-B)/(hi-lo);
+  c.strokeStyle=css.getPropertyValue("--line").trim();c.fillStyle=css.getPropertyValue("--mut").trim();c.font="10px system-ui";c.lineWidth=1;
+  for(let k=0;k<4;k++){const v=lo+(hi-lo)*k/3,yy=y(v);c.beginPath();c.moveTo(L,yy);c.lineTo(W-R,yy);c.stroke();c.fillText(fmt(Math.round(v)),W-R+4,yy+3)}
+  c.beginPath();s.forEach((p,i)=>i?c.lineTo(x(i),y(p.v)):c.moveTo(x(i),y(p.v)));
+  c.strokeStyle=col;c.lineWidth=1.8;c.stroke();
+  c.lineTo(x(s.length-1),H-B);c.lineTo(x(0),H-B);c.closePath();c.globalAlpha=.1;c.fillStyle=col;c.fill();c.globalAlpha=1;
+  c.fillStyle=css.getPropertyValue("--mut").trim();
+  c.fillText(s[0].d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}),L,H-2);
+  if(hoverX!=null){
+    const i=Math.max(0,Math.min(s.length-1,Math.round((hoverX-L)/(W-L-R)*(s.length-1))));
+    const p=s[i];c.strokeStyle=css.getPropertyValue("--mut").trim();c.beginPath();c.moveTo(x(i),T);c.lineTo(x(i),H-B);c.stroke();
+    c.fillStyle=col;c.beginPath();c.arc(x(i),y(p.v),3.5,0,7);c.fill();
+    const t=p.d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"2-digit"})+"  "+fmt(+p.v.toFixed(2));
+    const tw=c.measureText(t).width+12,tx=Math.min(Math.max(x(i)-tw/2,2),W-tw-2);
+    c.fillStyle=css.getPropertyValue("--text").trim();c.fillRect(tx,T,tw,18);
+    c.fillStyle=css.getPropertyValue("--card").trim();c.fillText(t,tx+6,T+12);
+  }
+}
+function render(){
+  $("#rng").innerHTML="";
+  RANGES.forEach(([l,n])=>{const b=document.createElement("button");b.textContent=l;if(n===range)b.className="on";b.onclick=()=>{range=n;render()};$("#rng").appendChild(b)});
+  const g=$("#grid");g.innerHTML="";
+  IDX.forEach(([n,t])=>{
+    const card=document.createElement("div");card.className="card";
+    const full=data[n],s=full&&full.slice(-range);
+    let top="";
+    if(s&&s.length>1){
+      const last=s[s.length-1].v,prev=s[s.length-2].v,d=last-prev,p=d/prev*100;
+      top=`<div class="px">${fmt(+last.toFixed(2))}<div class="ch ${d>=0?"up":"dn"}">${d>=0?"▲":"▼"} ${fmt(+Math.abs(d).toFixed(2))} (${p.toFixed(2)}%)</div></div>`;
+    }
+    card.innerHTML=`<div class="hd"><div><div class="nm">${n}</div><div class="tk">${t}</div></div>${top}</div>
+      ${s&&s.length>1?'<canvas></canvas>':'<div class="empty">No data yet<br>Upload a daily CSV for this index</div>'}
+      <div class="ft"><span>${s&&s.length>1?s[0].d.toLocaleDateString("en-GB")+" → "+s[s.length-1].d.toLocaleDateString("en-GB"):""}</span>
+      <label style="cursor:pointer;color:var(--acc)">Upload CSV<input type="file" accept=".csv"></label></div>`;
+    card.querySelector("input").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(x=>loadSingle(n,x))};
+    g.appendChild(card);
+    const cv=card.querySelector("canvas");
+    if(cv){draw(cv,s);cv.onmousemove=e=>draw(cv,s,e.offsetX);cv.onmouseleave=()=>draw(cv,s);
+      cv.ontouchmove=e=>{const r=cv.getBoundingClientRect();draw(cv,s,e.touches[0].clientX-r.left)}}
+  });
+}
+$("#all").onchange=e=>{const f=e.target.files[0];if(f)f.text().then(loadCombined)};
+$("#demo").onclick=sample;
+addEventListener("resize",render);
+fetch("dashboard.csv?v="+Date.now()).then(r=>r.ok?r.text():Promise.reject()).then(loadCombined).catch(()=>{});
+render();
+</script>
+</body>
+</html>
